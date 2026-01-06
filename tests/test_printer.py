@@ -12,16 +12,23 @@ from xdsl.dialects.builtin import (
     DYNAMIC_INDEX,
     AnyFloat,
     Builtin,
+    CallSiteLoc,
     ComplexType,
+    FileLineColLoc,
     FloatAttr,
     FunctionType,
+    FusedLoc,
     IndexType,
     IntAttr,
     IntegerType,
     ModuleOp,
+    NameLoc,
+    NoneAttr,
     Signedness,
+    StringAttr,
     SymbolRefAttr,
     UnitAttr,
+    UnknownLoc,
     f32,
     i1,
     i32,
@@ -82,6 +89,16 @@ def test_print_op_location():
 
     assert_print_op(add, expected, print_debuginfo=True)
 
+    add.location = UnknownLoc()
+
+    assert_print_op(add, expected, print_debuginfo=True)
+
+    add.location = FileLineColLoc(StringAttr("one"), IntAttr(2), IntAttr(3))
+
+    expected = """%0 = "test.op"() : () -> i32 loc("one":2:3)"""
+
+    assert_print_op(add, expected, print_debuginfo=True)
+
 
 @irdl_op_definition
 class UnitAttrOp(IRDLOperation):
@@ -113,6 +130,38 @@ def test_added_unit_attr():
     )
 
     assert_print_op(unitop, expected)
+
+
+def test_locations():
+    def to_string(loc: Attribute):
+        io = StringIO()
+        p = Printer(stream=io, print_debuginfo=True)
+        p.print_attribute(loc)
+        return io.getvalue()
+
+    location = UnknownLoc()
+    assert to_string(location) == """loc(unknown)"""
+
+    location = FileLineColLoc(StringAttr("one"), IntAttr(2), IntAttr(3))
+    assert to_string(location) == """loc("one":2:3)"""
+
+    location = NameLoc(StringAttr("abc"), NoneAttr())
+    assert to_string(location) == """loc("abc")"""
+
+    location = NameLoc(StringAttr("abc"), NameLoc(StringAttr("def"), NoneAttr()))
+    assert to_string(location) == """loc("abc"("def"))"""
+
+    location = CallSiteLoc(
+        NameLoc(StringAttr("callee"), NoneAttr()),
+        NameLoc(StringAttr("caller"), NoneAttr()),
+    )
+    assert to_string(location) == """loc(callsite("callee" at "caller"))"""
+
+    location = FusedLoc((UnknownLoc(), UnknownLoc()), NoneAttr())
+    assert to_string(location) == """loc(fused[unknown, unknown])"""
+
+    location = FusedLoc((UnknownLoc(), UnknownLoc()), StringAttr("metadata"))
+    assert to_string(location) == """loc(fused<"metadata">[unknown, unknown])"""
 
 
 #  ____  _                             _   _
@@ -410,14 +459,21 @@ def test_print_block_argument():
 
 def test_print_block_argument_location():
     """Print a block argument with location."""
-    block = Block(arg_types=[i32, i32])
+    block = Block(arg_types=[i32, i32, i32])
 
+    block.args[1].location = UnknownLoc()
+    block.args[2].location = FileLineColLoc(StringAttr("one"), IntAttr(2), IntAttr(3))
     io = StringIO()
     p = Printer(stream=io, print_debuginfo=True)
     p.print_block_argument(block.args[0])
     p.print_string(", ")
     p.print_block_argument(block.args[1])
-    assert io.getvalue() == """%0 : i32 loc(unknown), %1 : i32 loc(unknown)"""
+    p.print_string(", ")
+    p.print_block_argument(block.args[2])
+    assert (
+        io.getvalue()
+        == """%0 : i32 loc(unknown), %1 : i32 loc(unknown), %2 : i32 loc("one":2:3)"""
+    )
 
 
 def test_print_block():
